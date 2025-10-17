@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Employee Time Tracking System</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Employee Time Tracking System</h1>
+        
+        <div class="section">
+            <h2>Upload Excel File</h2>
+            <div class="file-input">
+                <input type="file" id="fileInput" accept=".xlsx, .xls">
+            </div>
+            <button id="processBtn">Process Data</button>
+            <div id="loadingIndicator" class="loading">
+                <div class="spinner"></div>
+                <p>Processing file... Please wait.</p>
+            </div>
+            <div id="errorMessage" class="error-message"></div>
+            <div id="successMessage" class="success-message"></div>
+        </div>
+        
+        <div class="tabs">
+            <div class="tab active" data-tab="summary">Summary</div>
+            <div class="tab" data-tab="employee">Employee Details</div>
+            <div class="tab" data-tab="manual">Manual Entry</div>
+            <div class="tab" data-tab="raw">Raw Data</div>
+        </div>
+        
+        <div class="tab-content active" id="summary-tab">
+            <div class="controls">
+                <div class="report-period">
+                    <label for="reportType">Report Type:</label>
+                    <select id="reportType">
+                        <option value="monthly">Monthly</option>
+                        <option value="yearly">Yearly</option>
+                    </select>
+                    <select id="monthSelect">
+                        <option value="0">January</option>
+                        <option value="1">February</option>
+                        <option value="2">March</option>
+                        <option value="3">April</option>
+                        <option value="4">May</option>
+                        <option value="5">June</option>
+                        <option value="6">July</option>
+                        <option value="7">August</option>
+                        <option value="8">September</option>
+                        <option value="9">October</option>
+                        <option value="10">November</option>
+                        <option value="11">December</option>
+                    </select>
+                    <input type="number" id="yearSelect" min="2020" max="2030" value="2025">
+                </div>
+                <div>
+                    <button id="exportSummary" class="success">Export Summary</button>
+                </div>
+            </div>
+            
+            <h2>Employee Summary</h2>
+            <table class="summary-table" id="summaryTable">
+                <thead>
+                    <tr>
+                        <th>Employee Name</th>
+                        <th>Employee ID</th>
+                        <th>Work Days</th>
+                        <th>Late Days</th>
+                        <th>Total Late (Minutes)</th>
+                        <th>Total Late (Hours)</th>
+                    </tr>
+                </thead>
+                <tbody id="summaryBody">
+                    <tr>
+                        <td colspan="6" style="text-align: center;">No data available. Please upload and process an Excel file.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="tab-content" id="employee-tab">
+            <div class="controls">
+                <div class="employee-selector">
+                    <label for="employeeDetailSelect">Select Employee:</label>
+                    <select id="employeeDetailSelect">
+                        <option value="">-- Select Employee --</option>
+                    </select>
+                </div>
+                <div class="report-period">
+                    <label for="employeeReportType">Report Type:</label>
+                    <select id="employeeReportType">
+                        <option value="monthly">Monthly</option>
+                        <option value="yearly">Yearly</option>
+                    </select>
+                    <select id="employeeMonthSelect">
+                        <option value="0">January</option>
+                        <option value="1">February</option>
+                        <option value="2">March</option>
+                        <option value="3">April</option>
+                        <option value="4">May</option>
+                        <option value="5">June</option>
+                        <option value="6">July</option>
+                        <option value="7">August</option>
+                        <option value="8">September</option>
+                        <option value="9">October</option>
+                        <option value="10">November</option>
+                        <option value="11">December</option>
+                    </select>
+                    <input type="number" id="employeeYearSelect" min="2020" max="2030" value="2025">
+                </div>
+                <div>
+                    <button id="exportEmployee" class="success">Export Employee Data</button>
+                </div>
+            </div>
+            
+            <div id="employeeDetailContent">
+                <div class="employee-detail">
+                    <h3 id="employeeDetailName">Employee Details</h3>
+                    <div class="monthly-summary">
+                        <h4>Monthly Summary</h4>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Month</th>
+                                    <th>Work Days</th>
+                                    <th>Late Days</th>
+                                    <th>Total Late (Minutes)</th>
+                                    <th>Total Late (Hours)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="employeeMonthlySummary">
+                                <tr>
+                                    <td colspan="5" style="text-align: center;">No data available. Please select an employee.</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="daily-details">
+                        <h4>Daily Details</h4>
+                        <div class="calendar-view">
+                            <table id="employeeDailyTable">
+                                <thead>
+                                    <tr>
+                                        <th class="calendar-day">Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="employeeDailyBody">
+                                    <tr>
+                                        <td colspan="32" style="text-align: center;">No data available. Please select an employee.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="tab-content" id="manual-tab">
+            <h2>Manual Time Entry</h2>
+            <p>Use this form to add entries for employees who forgot to scan.</p>
+            <div id="manualEntryError" class="error-message"></div>
+            <div class="manual-entry">
+                <select id="employeeSelect">
+                    <option value="">Select Employee</option>
+                </select>
+                <input type="date" id="manualDate">
+                <input type="time" id="manualTime">
+                
+                <div class="manual-entry-type">
+                    <label>
+                        <input type="radio" name="entryType" value="work-related" checked> Late Clock In due to Work Related
+                    </label>
+                    <label>
+                        <input type="radio" name="entryType" value="missing"> Missing Clock In Time
+                    </label>
+                </div>
+                
+                <button id="addManualEntry">Add Entry</button>
+            </div>
+            
+            <h3>Manual Entries</h3>
+            <table id="manualEntriesTable">
+                <thead>
+                    <tr>
+                        <th>Employee Name</th>
+                        <th>Date</th>
+                        <th>Time</th>
+                        <th>Type</th>
+                        <th>Late Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="manualEntriesBody">
+                    <tr>
+                        <td colspan="6" style="text-align: center;">No manual entries added yet.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="tab-content" id="raw-tab">
+            <h2>Raw Data</h2>
+            <table id="rawDataTable">
+                <thead>
+                    <tr>
+                        <th>Employee Name</th>
+                        <th>Equipment</th>
+                        <th>Employee ID</th>
+                        <th>Time</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody id="rawDataBody">
+                    <tr>
+                        <td colspan="5" style="text-align: center;">No data available. Please upload and process an Excel file.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Confirmation Dialog -->
+        <div class="confirmation-dialog" id="confirmationDialog">
+            <div class="confirmation-content">
+                <h3>Confirm Late Status</h3>
+                <p id="confirmationText">Is this employee late or was this a Missing Clock In Time?</p>
+                <div class="confirmation-buttons">
+                    <button id="confirmLate" class="secondary">Mark as Late</button>
+                    <button id="confirmNotLate" class="success">Missing Clock In Time</button>
+                    <button id="cancelConfirm">Cancel</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="export-options">
+            <h3>Export Reports</h3>
+            <button id="exportMonthly" class="success">Export Monthly Report</button>
+            <button id="exportYearly" class="success">Export Yearly Report</button>
+            <button id="clearData" class="danger" style="margin-left: 20px;">Clear All Data</button>
+        </div>
+
+        <div class="data-status">
+            <p><strong>Data Status:</strong> <span id="dataStatus">No data loaded</span></p>
+        </div>
+    </div>
+
+    <!-- Include SheetJS library for Excel processing -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <script src="script.js"></script>
+</body>
+</html>
