@@ -795,6 +795,19 @@ function handleTabClick() {
     }
 }
 
+// Export summary data (EXCEL)
+function exportSummary() {
+    const reportType = document.getElementById('reportType').value;
+    const month = parseInt(document.getElementById('monthSelect').value);
+    const year = parseInt(document.getElementById('yearSelect').value);
+
+    const filename = `employee_summary_${reportType}_${month + 1}_${year}`;
+
+    // Export table as Excel
+    downloadExcelFromTable("summaryTable", filename);
+}
+
+/*
 // Export summary data
 function exportSummary() {
     const reportType = document.getElementById('reportType').value;
@@ -874,8 +887,28 @@ function exportSummary() {
     });
     
     downloadCSV(csvContent, `employee_summary_${reportType}_${month + 1}_${year}.csv`);
+}*/
+
+// Export employee data (EXCEL)
+function exportEmployeeData() {
+    const employeeName = document.getElementById('employeeDetailSelect').value;
+
+    if (!employeeName) {
+        alert("Please select an employee first.");
+        return;
+    }
+
+    const reportType = document.getElementById('employeeReportType').value;
+    const month = parseInt(document.getElementById('employeeMonthSelect').value);
+    const year = parseInt(document.getElementById('employeeYearSelect').value);
+
+    const filename = `${employeeName}_details_${reportType}_${month + 1}_${year}`;
+
+    // Use the daily table for export
+    downloadExcelFromTable("employeeDailyTable", filename);
 }
 
+/*
 // Export employee data
 function exportEmployeeData() {
     const employeeName = document.getElementById('employeeDetailSelect').value;
@@ -913,6 +946,7 @@ function exportEmployeeData() {
     
     downloadCSV(csvContent, `${employeeName}_details_${reportType}_${month + 1}_${year}.csv`);
 }
+*/
 
 // Helper function to download CSV
 function downloadCSV(csvContent, filename) {
@@ -927,4 +961,15 @@ function downloadCSV(csvContent, filename) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+}
+
+// Helper: Export HTML table to Excel (.xlsx)
+function downloadExcelFromTable(tableId, filename) {
+    const table = document.getElementById(tableId);
+    const worksheet = XLSX.utils.table_to_sheet(table);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
+
+    XLSX.writeFile(workbook, filename + ".xlsx");
 }
