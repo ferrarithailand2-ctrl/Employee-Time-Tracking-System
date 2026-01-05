@@ -15,13 +15,32 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function initDropdowns() {
     const months = monthNames.map((m, i) => `<option value="${i}">${m}</option>`).join('');
-    ['monthSelect', 'employeeMonthSelect', 'rawMonthFilter', 'monthToClear'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = (id === 'rawMonthFilter' || id === 'monthToClear' ? '<option value="">All Months</option>' : '') + months;
+    
+    // Initialize all month dropdowns
+    const monthDropdowns = ['monthSelect', 'employeeMonthSelect', 'rawMonthFilter', 'monthToClear'];
+    monthDropdowns.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            if (id === 'rawMonthFilter') {
+                element.innerHTML = '<option value="">All Months</option>' + months;
+            } else {
+                element.innerHTML = '<option value="">-- Select --</option>' + months;
+            }
+        }
     });
+    
+    // Set current month and year
     const now = new Date();
-    document.getElementById('monthSelect').value = now.getMonth();
-    document.getElementById('employeeMonthSelect').value = now.getMonth();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    
+    // Set default values
+    document.getElementById('monthSelect').value = currentMonth;
+    document.getElementById('employeeMonthSelect').value = currentMonth;
+    document.getElementById('yearSelect').value = currentYear;
+    document.getElementById('employeeYearSelect').value = currentYear;
+    document.getElementById('rawYearFilter').value = currentYear;
+    document.getElementById('yearToClear').value = currentYear;
 }
 
 function saveData() {
@@ -43,8 +62,15 @@ function setupEventListeners() {
         });
     });
 
-    ['reportType', 'monthSelect', 'yearSelect'].forEach(id => document.getElementById(id).addEventListener('change', updateSummaryTable));
-    ['employeeDetailSelect', 'employeeReportType', 'employeeMonthSelect', 'employeeYearSelect'].forEach(id => document.getElementById(id).addEventListener('change', updateEmployeeDetailView));
+    ['reportType', 'monthSelect', 'yearSelect'].forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.addEventListener('change', updateSummaryTable);
+    });
+    
+    ['employeeDetailSelect', 'employeeReportType', 'employeeMonthSelect', 'employeeYearSelect'].forEach(id => {
+        const element = document.getElementById(id);
+        if (element) element.addEventListener('change', updateEmployeeDetailView);
+    });
 
     document.getElementById('exportSummary').addEventListener('click', exportSummaryToExcel);
     document.getElementById('exportEmployee').addEventListener('click', exportEmployeeDetailToExcel);
@@ -76,13 +102,17 @@ function addManualTime(name, dateStr) {
     const newTime = prompt(`Enter Clock-In time for ${name} on ${dateStr} (Format HH:mm):`);
     if (newTime === null) return;
     
+    // Simple validation
     if (!/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(newTime)) {
         alert("Invalid format! Use HH:mm (e.g. 08:05)");
         return;
     }
 
     if (!employeeData[name]) employeeData[name] = { id: '-', entries: [] };
+    
+    // Remove existing entry for that day if any to avoid duplicates
     employeeData[name].entries = employeeData[name].entries.filter(e => e.date !== dateStr);
+    
     employeeData[name].entries.push({ date: dateStr, time: newTime });
     saveData();
     updateEmployeeDetailView();
@@ -99,6 +129,8 @@ function updateEmployeeDetailView() {
     const type = document.getElementById('employeeReportType').value;
 
     document.getElementById('employeeDetailName').textContent = name;
+
+    // Daily Calendar Part
     const dailyBody = document.getElementById('employeeDailyBody');
     const dailyHead = document.getElementById('dailyHeader');
     const daysInMonth = new Date(y, m + 1, 0).getDate();
@@ -107,21 +139,27 @@ function updateEmployeeDetailView() {
     
     const cycleEntries = employeeData[name].entries.filter(e => isInCycle(e.date, m, y));
     const dayMap = {};
-    cycleEntries.forEach(e => { if(!dayMap[e.date]) dayMap[e.date] = e.time; });
+    cycleEntries.forEach(e => { 
+        if(!dayMap[e.date]) dayMap[e.date] = e.time; 
+    });
 
     let rTime = '<td><strong>Time</strong></td>';
     let rLate = '<td><strong>Late</strong></td>';
 
     for(let i = 1; i <= daysInMonth; i++) {
-        const monthNum = m + 1;
+        // Properly format the date to match what's in employeeData
+        const monthNum = m + 1; // Convert 0-based month to 1-based
         const dStr = `${y}-${String(monthNum).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
         const time = dayMap[dStr] || '-';
         const late = calcLate(name, dStr, time);
+        
+        // Make time cells clickable
         rTime += `<td class="calendar-cell" onclick="addManualTime('${name}', '${dStr}')">${time}</td>`;
         rLate += `<td class="${late > 0 ? 'late-time' : ''}">${late > 0 ? late : '-'}</td>`;
     }
     dailyBody.innerHTML = `<tr>${rTime}</tr><tr>${rLate}</tr>`;
 
+    // Monthly/Yearly Summary Part
     const sumBody = document.getElementById('employeeMonthlySummary');
     sumBody.innerHTML = '';
     if (type === 'yearly') {
@@ -135,57 +173,237 @@ function updateEmployeeDetailView() {
     }
 }
 
+// 6. EXCEL PROCESSING
 function processExcelFile() {
     const file = document.getElementById('fileInput').files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = e => {
         const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
-        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true, cellNF: false, cellText: false });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        // Convert to JSON with headers
         const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: null });
         
-        jsonData.forEach(row => {
-            let name = row['ชื่อพนักงาน'] || row['Name'] || row['Employee'];
-            let date = row['วันที่'] || row['Date'];
-            let time = row['เวลา'] || row['Time'];
-            let empId = row['รหัสพนักงาน'] || row['ID'] || '-';
-
-            if (!name || !date) return;
-
-            // Simplified date parsing for standard Excel formats
-            let dObj = new Date(date);
-            const dStr = dObj.toISOString().split('T')[0];
+        if (jsonData.length === 0) {
+            alert("Empty file or no data found!");
+            return;
+        }
+        
+        console.log("First few rows of parsed data:", jsonData.slice(0, 5));
+        
+        let processedCount = 0;
+        let skippedCount = 0;
+        
+        // Process each row
+        jsonData.forEach((row, index) => {
+            // Get column names from the first row
+            const keys = Object.keys(row);
             
+            // Find the correct columns
+            let name = '', date = '', time = '', empId = '-';
+            
+            // Look for name in different possible column names
+            const nameKeys = ['ชื่อพนักงาน', 'ชื่อ', 'Name', 'Employee', 'Employee Name', 'พนักงาน'];
+            for (const key of nameKeys) {
+                if (row[key] !== undefined) {
+                    name = String(row[key]).trim();
+                    break;
+                }
+            }
+            
+            // If not found by key name, try to find by position
+            if (!name) {
+                // Try first column that's not empty
+                for (const key of keys) {
+                    const value = String(row[key] || '').trim();
+                    if (value && value.length > 0 && !value.match(/^\d{1,2}[-/]\w{3,}[-/]\d{4}$/) && !value.match(/^\d{1,2}:\d{2}$/)) {
+                        name = value;
+                        break;
+                    }
+                }
+            }
+            
+            if (!name) {
+                skippedCount++;
+                return;
+            }
+            
+            // Find date - look for date-like values
+            const dateKeys = ['วันที่', 'Date', 'DATE', 'วันเดือนปี'];
+            for (const key of dateKeys) {
+                if (row[key] !== undefined) {
+                    date = row[key];
+                    break;
+                }
+            }
+            
+            // If not found by key, look for date pattern
+            if (!date) {
+                for (const key of keys) {
+                    const value = row[key];
+                    if (value && (value instanceof Date || String(value).match(/\d{1,2}[-/]\w{3,}[-/]\d{4}/))) {
+                        date = value;
+                        break;
+                    }
+                }
+            }
+            
+            // Find time - look for time-like values
+            const timeKeys = ['เวลา', 'Time', 'TIME', 'Clock'];
+            for (const key of timeKeys) {
+                if (row[key] !== undefined) {
+                    time = row[key];
+                    break;
+                }
+            }
+            
+            // If not found by key, look for time pattern
+            if (!time) {
+                for (const key of keys) {
+                    const value = row[key];
+                    if (value && (value instanceof Date || String(value).match(/\d{1,2}:\d{2}/))) {
+                        time = value;
+                        break;
+                    }
+                }
+            }
+            
+            // Parse date
+            let dateObj;
+            if (date instanceof Date) {
+                dateObj = date;
+            } else if (typeof date === 'string') {
+                // Parse DD-MMM-YYYY format
+                const match = date.match(/^(\d{1,2})[-/](\w{3,})[-/](\d{4})$/i);
+                if (match) {
+                    const day = parseInt(match[1], 10);
+                    const monthStr = match[2].toLowerCase();
+                    const year = parseInt(match[3], 10);
+                    
+                    const monthMap = {
+                        'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
+                        'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11
+                    };
+                    
+                    const month = monthMap[monthStr.substring(0, 3)];
+                    if (month !== undefined) {
+                        dateObj = new Date(year, month, day);
+                    } else {
+                        dateObj = new Date(date);
+                    }
+                } else {
+                    dateObj = new Date(date);
+                }
+            } else if (typeof date === 'number') {
+                // Excel serial date
+                const excelEpoch = new Date(1899, 11, 30);
+                dateObj = new Date(excelEpoch.getTime() + date * 86400000);
+            }
+            
+            if (!dateObj || isNaN(dateObj.getTime())) {
+                console.warn(`Skipping row ${index+1}: Invalid date -`, date);
+                skippedCount++;
+                return;
+            }
+            
+            // Format date as YYYY-MM-DD
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            const dStr = `${year}-${month}-${day}`;
+            
+            // Parse time
             let timeStr = '-';
             if (time instanceof Date) {
-                timeStr = `${String(time.getHours()).padStart(2, '0')}:${String(time.getMinutes()).padStart(2, '0')}`;
+                const hours = String(time.getHours()).padStart(2, '0');
+                const minutes = String(time.getMinutes()).padStart(2, '0');
+                timeStr = `${hours}:${minutes}`;
+            } else if (typeof time === 'number') {
+                const totalSeconds = Math.round(time * 86400);
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+            } else if (typeof time === 'string') {
+                timeStr = time.trim();
+                if (!/^\d{1,2}:\d{2}$/.test(timeStr)) {
+                    timeStr = '-';
+                }
             }
-
-            if (!employeeData[name]) employeeData[name] = { id: empId, entries: [] };
-            if (!employeeData[name].entries.find(e => e.date === dStr)) {
+            
+            // Get employee ID if available
+            const idKeys = ['รหัสพนักงาน', 'รหัส', 'ID', 'Employee ID', 'Emp ID'];
+            for (const key of idKeys) {
+                if (row[key] !== undefined) {
+                    empId = String(row[key]).trim();
+                    break;
+                }
+            }
+            
+            // Initialize employee data if not exists
+            if (!employeeData[name]) {
+                employeeData[name] = { id: empId, entries: [] };
+            }
+            
+            // Keep the first ID we find for this employee
+            if (employeeData[name].id === '-' && empId !== '-') {
+                employeeData[name].id = empId;
+            }
+            
+            // Check if we already have an entry for this date
+            const existingEntry = employeeData[name].entries.find(e => e.date === dStr);
+            if (!existingEntry) {
                 employeeData[name].entries.push({ date: dStr, time: timeStr });
+                processedCount++;
+            } else if (existingEntry.time === '-' && timeStr !== '-') {
+                existingEntry.time = timeStr;
+                processedCount++;
             }
         });
+        
+        // Sort entries by date for each employee
+        Object.keys(employeeData).forEach(name => {
+            employeeData[name].entries.sort((a, b) => new Date(a.date) - new Date(b.date));
+        });
+        
         saveData();
         refreshUI();
-        alert("Data processed successfully!");
+        
+        let message = `Data processed successfully!`;
+        message += `\nProcessed: ${processedCount} entries`;
+        message += `\nTotal employees: ${Object.keys(employeeData).length}`;
+        if (skippedCount > 0) {
+            message += `\nSkipped: ${skippedCount} rows (invalid or incomplete data)`;
+        }
+        alert(message);
     };
     reader.readAsArrayBuffer(file);
 }
 
 function getStats(name, entries) {
-    let mins = 0, late = 0;
-    entries.forEach(e => {
-        const m = calcLate(name, e.date, e.time);
-        if(m > 0) { mins += m; late++; }
+    const daily = {};
+    entries.forEach(e => { 
+        if(!daily[e.date]) daily[e.date] = e.time; 
     });
-    return { days: entries.length, late, mins };
+    let mins = 0, late = 0;
+    Object.keys(daily).forEach(d => {
+        const m = calcLate(name, d, daily[d]);
+        if(m > 0) { 
+            mins += m; 
+            late++; 
+        }
+    });
+    return { 
+        days: Object.keys(daily).length, 
+        late, 
+        mins 
+    };
 }
 
 function updateSummaryTable() {
     const body = document.getElementById('summaryBody');
-    if (!body) return;
     body.innerHTML = '';
     const type = document.getElementById('reportType').value;
     const m = parseInt(document.getElementById('monthSelect').value);
@@ -193,7 +411,9 @@ function updateSummaryTable() {
 
     Object.keys(employeeData).forEach(name => {
         const entries = employeeData[name].entries.filter(e => 
-            type === 'yearly' ? new Date(e.date).getFullYear() == y : isInCycle(e.date, m, y)
+            type === 'yearly' 
+                ? new Date(e.date).getFullYear() == y 
+                : isInCycle(e.date, m, y)
         );
         const stats = getStats(name, entries);
         const row = body.insertRow();
@@ -203,7 +423,6 @@ function updateSummaryTable() {
 
 function updateRawDataTable() {
     const body = document.getElementById('rawDataBody');
-    if (!body) return;
     body.innerHTML = '';
     const empF = document.getElementById('rawEmployeeFilter').value;
     const mF = document.getElementById('rawMonthFilter').value;
@@ -221,10 +440,15 @@ function updateRawDataTable() {
 }
 
 function updateEmployeeSelects() {
-    const options = '<option value="">-- Select --</option>' + Object.keys(employeeData).sort().map(n => `<option value="${n}">${n}</option>`).join('');
-    ['employeeDetailSelect', 'rawEmployeeFilter', 'employeeToClear'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = options;
+    const options = '<option value="">-- Select --</option>' + Object.keys(employeeData).map(n => `<option value="${n}">${n}</option>`).join('');
+    
+    // Update employee dropdowns
+    const employeeDropdowns = ['employeeDetailSelect', 'rawEmployeeFilter', 'employeeToClear'];
+    employeeDropdowns.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.innerHTML = options;
+        }
     });
 }
 
@@ -234,6 +458,7 @@ function refreshUI() {
     updateRawDataTable();
 }
 
+// 7. SCHEDULE MANAGEMENT
 function saveSchedule() {
     const n = document.getElementById('newEmpName').value;
     const s = document.getElementById('newEmpStart').value;
@@ -248,7 +473,12 @@ function saveSchedule() {
 function updateScheduleTable() {
     const body = document.getElementById('scheduleBody');
     body.innerHTML = Object.keys(workSchedules).map(n => 
-        `<tr><td>${n}</td><td>${workSchedules[n].start}</td><td>${workSchedules[n].mondayStart}</td><td><button onclick="deleteSched('${n}')" class="danger">X</button></td></tr>`
+        `<tr>
+            <td>${n}</td>
+            <td>${workSchedules[n].start}</td>
+            <td>${workSchedules[n].mondayStart}</td>
+            <td><button onclick="deleteSched('${n}')" class="danger">X</button></td>
+        </tr>`
     ).join('');
 }
 
@@ -258,51 +488,68 @@ window.deleteSched = (n) => {
     updateScheduleTable(); 
 };
 
-// --- DATA MANAGEMENT FUNCTIONS ---
-
+// 8. DATA MANAGEMENT FUNCTIONS
 function clearAllData() {
-    if(confirm("Are you sure you want to delete ALL data? This cannot be undone!")) {
+    if(confirm("⚠️ WARNING: Are you sure you want to delete ALL data?\n\nThis will delete:\n• All employee time records\n• All employee schedules (except default)\n• All settings\n\nThis action cannot be undone!")) {
         localStorage.clear();
         employeeData = {};
-        workSchedules = { 'PANYAPHON': { start: '08:00', mondayStart: '07:30' } };
+        workSchedules = {
+            'PANYAPHON': { start: '08:00', mondayStart: '07:30' }
+        };
+        alert("All data has been cleared. The page will now reload.");
         location.reload();
     }
 }
 
-// FIX: New function to clear a specific employee
-window.clearSelectedEmployee = () => {
+// Clear specific employee data
+window.clearSelectedEmployee = function() {
     const name = document.getElementById('employeeToClear').value;
-    if (!name) return alert("Please select an employee first.");
-    
-    if (confirm(`Are you sure you want to delete all records for ${name}?`)) {
-        delete employeeData[name];
-        saveData();
-        refreshUI();
-        alert(`Data for ${name} has been removed.`);
+    if (!name) {
+        alert("Please select an employee first.");
+        return;
     }
-};
+    
+    if(confirm(`Are you sure you want to delete all time records for ${name}?\n\nThis will remove all clock-in data but keep their schedule.`)) {
+        if (employeeData[name]) {
+            // Keep the employee record but clear entries
+            employeeData[name].entries = [];
+            saveData();
+            refreshUI();
+            alert(`All time records for ${name} have been deleted.`);
+        }
+    }
+}
 
-// FIX: New function to clear a specific month
-window.clearSelectedMonth = () => {
+// Clear specific month data for all employees
+window.clearSelectedMonth = function() {
     const month = document.getElementById('monthToClear').value;
     const year = document.getElementById('yearToClear').value;
     
-    if (month === "" || !year) return alert("Please select both month and year.");
-
-    if (confirm(`Delete all records for ${monthNames[month]} ${year}?`)) {
+    if (!month || !year) {
+        alert("Please select both month and year.");
+        return;
+    }
+    
+    const monthName = monthNames[month];
+    if(confirm(`Are you sure you want to delete all time records for ${monthName} ${year}?\n\nThis will remove data for ALL employees for this month.`)) {
+        let deletedCount = 0;
+        
         Object.keys(employeeData).forEach(name => {
+            const originalLength = employeeData[name].entries.length;
             employeeData[name].entries = employeeData[name].entries.filter(e => {
                 const d = new Date(e.date);
-                return !(d.getMonth() == month && d.getFullYear() == year);
+                return !(d.getMonth() === parseInt(month) && d.getFullYear() === parseInt(year));
             });
+            deletedCount += (originalLength - employeeData[name].entries.length);
         });
+        
         saveData();
         refreshUI();
-        alert(`Records for ${monthNames[month]} ${year} have been cleared.`);
+        alert(`Deleted ${deletedCount} time records for ${monthName} ${year}.`);
     }
-};
+}
 
-// EXCEL EXPORT FUNCTIONS - FIXED VERSION
+// 9. EXCEL EXPORT FUNCTIONS
 function exportSummaryToExcel() {
     try {
         const table = document.getElementById('summaryTable');
@@ -512,40 +759,6 @@ function exportEmployeeDetailToExcel() {
                 (yearlyLateMins/60).toFixed(2),
                 yearlyLateRate
             ]);
-            
-            data.push([]); // Empty row
-            
-            // Add detailed attendance summary
-            const yearlyEntries = employeeData[name].entries.filter(e => new Date(e.date).getFullYear() == y);
-            const dayMapYearly = {};
-            yearlyEntries.forEach(e => { 
-                if(!dayMapYearly[e.date]) dayMapYearly[e.date] = e.time; 
-            });
-            
-            let onTimeDays = 0;
-            let lateDays = 0;
-            let noRecordDays = 0;
-            
-            Object.keys(dayMapYearly).forEach(dateStr => {
-                const time = dayMapYearly[dateStr];
-                if (time === '-') {
-                    noRecordDays++;
-                } else {
-                    const late = calcLate(name, dateStr, time);
-                    if (late > 0) {
-                        lateDays++;
-                    } else {
-                        onTimeDays++;
-                    }
-                }
-            });
-            
-            data.push(["ATTENDANCE ANALYSIS"]);
-            data.push(["Status", "Days", "Percentage"]);
-            data.push(["On Time", onTimeDays, yearlyWorkDays > 0 ? `${((onTimeDays/yearlyWorkDays)*100).toFixed(1)}%` : '0%']);
-            data.push(["Late", lateDays, yearlyWorkDays > 0 ? `${((lateDays/yearlyWorkDays)*100).toFixed(1)}%` : '0%']);
-            data.push(["No Record", noRecordDays, yearlyWorkDays > 0 ? `${((noRecordDays/yearlyWorkDays)*100).toFixed(1)}%` : '0%']);
-            data.push(["Total", yearlyWorkDays, "100%"]);
         }
         
         // Create worksheet
@@ -575,9 +788,6 @@ function exportEmployeeDetailToExcel() {
         }
         
         ws['!cols'] = colWidths;
-        
-        // Style the header rows (optional - makes Excel look better)
-        if (!ws['!merges']) ws['!merges'] = [];
         
         // Create workbook
         const wb = XLSX.utils.book_new();
