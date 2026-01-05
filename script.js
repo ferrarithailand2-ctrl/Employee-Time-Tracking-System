@@ -1,975 +1,774 @@
-// Store the processed data
-let employeeData = {};
-let manualEntries = [];
-let currentMonth = new Date().getMonth();
-let currentYear = new Date().getFullYear();
-
-// Define work schedules
-const workSchedules = {
-    'PANYAPHON': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'ALINE': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'JIRAPAT': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'KANATIP': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'Silikul': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'EITHUZARSOE': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'PONGSAKORN': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'MANEERAT': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'SARAWUT': { start: '08:00', end: '17:00', mondayStart: '07:30', mondayEnd: '16:30' },
-    'PORNWANDEE': { start: '08:30', end: '17:30', mondayStart: '08:30', mondayEnd: '17:30' },
-    'CHATNARIN': { start: '08:30', end: '17:30', mondayStart: '08:30', mondayEnd: '17:30' },
-    'CHANIDA': { start: '08:30', end: '17:30', mondayStart: '08:30', mondayEnd: '17:30' }
+// 1. DATA STORAGE
+let employeeData = JSON.parse(localStorage.getItem('employeeData')) || {};
+let workSchedules = JSON.parse(localStorage.getItem('workSchedules')) || {
+    'PANYAPHON': { start: '08:00', mondayStart: '07:30' }
 };
 
-// Initialize the application
-document.addEventListener('DOMContentLoaded', function() {
-    initializeApp();
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+
+// 2. INITIALIZATION
+document.addEventListener('DOMContentLoaded', () => {
+    initDropdowns();
+    setupEventListeners();
+    refreshUI();
 });
 
-function initializeApp() {
-    // Initialize date selects
-    document.getElementById('monthSelect').value = currentMonth;
-    document.getElementById('employeeMonthSelect').value = currentMonth;
-    document.getElementById('yearSelect').value = currentYear;
-    document.getElementById('employeeYearSelect').value = currentYear;
-    
-    // Initialize with today's date for manual entry
-    document.getElementById('manualDate').valueAsDate = new Date();
-    
-    // Set up event listeners
-    setupEventListeners();
+function initDropdowns() {
+    const months = monthNames.map((m, i) => `<option value="${i}">${m}</option>`).join('');
+    ['monthSelect', 'employeeMonthSelect', 'rawMonthFilter'].forEach(id => {
+        document.getElementById(id).innerHTML = (id === 'rawMonthFilter' ? '<option value="">All Months</option>' : '') + months;
+    });
+    const now = new Date();
+    document.getElementById('monthSelect').value = now.getMonth();
+    document.getElementById('employeeMonthSelect').value = now.getMonth();
+}
+
+function saveData() {
+    localStorage.setItem('employeeData', JSON.stringify(employeeData));
+    localStorage.setItem('workSchedules', JSON.stringify(workSchedules));
 }
 
 function setupEventListeners() {
-    // Process Excel file
     document.getElementById('processBtn').addEventListener('click', processExcelFile);
+    document.getElementById('saveEmpBtn').addEventListener('click', saveSchedule);
+    document.getElementById('applyRawFilter').addEventListener('click', updateRawDataTable);
     
-    // Manual entry
-    document.getElementById('addManualEntry').addEventListener('click', addManualEntryHandler);
-    
-    // Export buttons
-    document.getElementById('exportSummary').addEventListener('click', exportSummary);
-    document.getElementById('exportEmployee').addEventListener('click', exportEmployeeData);
-    
-    // Tab functionality - FIXED
     document.querySelectorAll('.tab').forEach(tab => {
-        tab.addEventListener('click', handleTabClick);
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab, .tab-content').forEach(el => el.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById(`${tab.dataset.tab}-tab`).classList.add('active');
+            if(tab.dataset.tab === 'settings') updateScheduleTable();
+        });
     });
-    
-    // Report controls
-    document.getElementById('reportType').addEventListener('change', updateSummaryTable);
-    document.getElementById('monthSelect').addEventListener('change', updateSummaryTable);
-    document.getElementById('yearSelect').addEventListener('change', updateSummaryTable);
-    
-    document.getElementById('employeeReportType').addEventListener('change', updateEmployeeDetailView);
-    document.getElementById('employeeMonthSelect').addEventListener('change', updateEmployeeDetailView);
-    document.getElementById('employeeYearSelect').addEventListener('change', updateEmployeeDetailView);
-    
-    // Confirmation dialog
-    document.getElementById('cancelConfirm').addEventListener('click', function() {
-        document.getElementById('confirmationDialog').style.display = 'none';
-    });
+
+    ['reportType', 'monthSelect', 'yearSelect'].forEach(id => document.getElementById(id).addEventListener('change', updateSummaryTable));
+    ['employeeDetailSelect', 'employeeReportType', 'employeeMonthSelect', 'employeeYearSelect'].forEach(id => document.getElementById(id).addEventListener('change', updateEmployeeDetailView));
+
+    document.getElementById('exportSummary').addEventListener('click', exportSummaryToExcel);
+    document.getElementById('exportEmployee').addEventListener('click', exportEmployeeDetailToExcel);
+    document.getElementById('clearData').addEventListener('click', clearAllData);
 }
 
-// Process the uploaded Excel file
-function processExcelFile() {
-    const fileInput = document.getElementById('fileInput');
-    if (!fileInput.files.length) {
-        alert('Please select an Excel file first.');
+// 3. LOGIC (Cycle 26th-25th)
+function isInCycle(dateStr, targetM, targetY) {
+    const d = new Date(dateStr);
+    const day = d.getDate();
+    const m = d.getMonth();
+    const y = d.getFullYear();
+    if (day >= 26) return m === (parseInt(targetM) - 1) && y === parseInt(targetY);
+    return m === parseInt(targetM) && y === parseInt(targetY);
+}
+
+function calcLate(name, date, time) {
+    const s = workSchedules[name];
+    if (!s || !time || time === '-') return 0;
+    const start = (new Date(date).getDay() === 1) ? s.mondayStart : s.start;
+    const [sh, sm] = start.split(':').map(Number);
+    const [th, tm] = time.split(':').map(Number);
+    const diff = (th * 60 + tm) - (sh * 60 + sm);
+    return diff > 0 ? diff : 0;
+}
+
+// 4. INTERACTIVE MANUAL ENTRY
+function addManualTime(name, dateStr) {
+    const newTime = prompt(`Enter Clock-In time for ${name} on ${dateStr} (Format HH:mm):`);
+    if (newTime === null) return;
+    
+    // Simple validation
+    if (!/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/.test(newTime)) {
+        alert("Invalid format! Use HH:mm (e.g. 08:05)");
         return;
     }
+
+    if (!employeeData[name]) employeeData[name] = { id: '-', entries: [] };
     
-    const file = fileInput.files[0];
+    // Remove existing entry for that day if any to avoid duplicates
+    employeeData[name].entries = employeeData[name].entries.filter(e => e.date !== dateStr);
+    
+    employeeData[name].entries.push({ date: dateStr, time: newTime });
+    saveData();
+    updateEmployeeDetailView();
+    updateSummaryTable();
+    updateRawDataTable();
+}
+
+// 5. RENDERING - FIXED VERSION
+function updateEmployeeDetailView() {
+    const name = document.getElementById('employeeDetailSelect').value;
+    if (!name || !employeeData[name]) return;
+    const m = parseInt(document.getElementById('employeeMonthSelect').value);
+    const y = parseInt(document.getElementById('employeeYearSelect').value);
+    const type = document.getElementById('employeeReportType').value;
+
+    document.getElementById('employeeDetailName').textContent = name;
+
+    // Daily Calendar Part
+    const dailyBody = document.getElementById('employeeDailyBody');
+    const dailyHead = document.getElementById('dailyHeader');
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    
+    dailyHead.innerHTML = '<th>Row</th>' + Array.from({length: daysInMonth}, (_, i) => `<th>${i+1}</th>`).join('');
+    
+    const cycleEntries = employeeData[name].entries.filter(e => isInCycle(e.date, m, y));
+    const dayMap = {};
+    cycleEntries.forEach(e => { 
+        if(!dayMap[e.date]) dayMap[e.date] = e.time; 
+    });
+
+    let rTime = '<td><strong>Time</strong></td>';
+    let rLate = '<td><strong>Late</strong></td>';
+
+    for(let i = 1; i <= daysInMonth; i++) {
+        // Properly format the date to match what's in employeeData
+        const monthNum = m + 1; // Convert 0-based month to 1-based
+        const dStr = `${y}-${String(monthNum).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
+        const time = dayMap[dStr] || '-';
+        const late = calcLate(name, dStr, time);
+        
+        // Make time cells clickable
+        rTime += `<td class="calendar-cell" onclick="addManualTime('${name}', '${dStr}')">${time}</td>`;
+        rLate += `<td class="${late > 0 ? 'late-time' : ''}">${late > 0 ? late : '-'}</td>`;
+    }
+    dailyBody.innerHTML = `<tr>${rTime}</tr><tr>${rLate}</tr>`;
+
+    // Monthly/Yearly Summary Part
+    const sumBody = document.getElementById('employeeMonthlySummary');
+    sumBody.innerHTML = '';
+    if (type === 'yearly') {
+        for(let i = 0; i < 12; i++) {
+            const stats = getStats(name, employeeData[name].entries.filter(e => isInCycle(e.date, i, y)));
+            if(stats.days > 0) sumBody.innerHTML += `<tr><td>Ending 25-${monthNames[i]}</td><td>${stats.days}</td><td>${stats.late}</td><td>${stats.mins}</td><td>${(stats.mins/60).toFixed(2)}</td></tr>`;
+        }
+    } else {
+        const stats = getStats(name, cycleEntries);
+        sumBody.innerHTML = `<tr><td>${monthNames[m]} Cycle</td><td>${stats.days}</td><td>${stats.late}</td><td>${stats.mins}</td><td>${(stats.mins/60).toFixed(2)}</td></tr>`;
+    }
+}
+
+// SIMPLIFIED EXCEL PARSING - WORKS FOR BOTH FORMATS
+function processExcelFile() {
+    const file = document.getElementById('fileInput').files[0];
+    if (!file) return;
     const reader = new FileReader();
-    
-    reader.onload = function(e) {
-        try {
-            const data = new Uint8Array(e.target.result);
-            const workbook = XLSX.read(data, { type: 'array' });
+    reader.onload = e => {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true, cellNF: false, cellText: false });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        
+        // Convert to JSON with headers
+        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: null });
+        
+        if (jsonData.length === 0) {
+            alert("Empty file or no data found!");
+            return;
+        }
+        
+        console.log("First few rows of parsed data:", jsonData.slice(0, 5));
+        
+        let processedCount = 0;
+        let skippedCount = 0;
+        
+        // Process each row
+        jsonData.forEach((row, index) => {
+            // Get column names from the first row
+            const keys = Object.keys(row);
             
-            // Assuming the first sheet contains the data
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
+            // Debug: Show what columns we have
+            if (index === 0) {
+                console.log("Available columns:", keys);
+            }
             
-            // Convert to JSON
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1 });
+            // Find the correct columns - try different possible names
+            let name = '', date = '', time = '', empId = '-';
             
-            // Process the data (skip header row)
-            processEmployeeData(jsonData.slice(1));
+            // Look for name in different possible column names
+            const nameKeys = ['ชื่อพนักงาน', 'ชื่อ', 'Name', 'Employee', 'Employee Name', 'พนักงาน'];
+            for (const key of nameKeys) {
+                if (row[key] !== undefined) {
+                    name = String(row[key]).trim();
+                    break;
+                }
+            }
             
-            // Update the UI
-            updateSummaryTable();
-            updateRawDataTable();
-            updateEmployeeSelect();
-            updateEmployeeDetailSelect();
+            // If not found by key name, try to find by position
+            if (!name) {
+                // Try first column that's not empty
+                for (const key of keys) {
+                    const value = String(row[key] || '').trim();
+                    if (value && value.length > 0 && !value.match(/^\d{1,2}[-/]\w{3,}[-/]\d{4}$/) && !value.match(/^\d{1,2}:\d{2}$/)) {
+                        name = value;
+                        break;
+                    }
+                }
+            }
             
-            alert('Data processed successfully!');
-        } catch (error) {
-            console.error('Error processing file:', error);
-            alert('Error processing file. Please make sure it\'s a valid Excel file.');
+            if (!name) {
+                skippedCount++;
+                return;
+            }
+            
+            // Find date - look for date-like values
+            const dateKeys = ['วันที่', 'Date', 'DATE', 'วันเดือนปี'];
+            for (const key of dateKeys) {
+                if (row[key] !== undefined) {
+                    date = row[key];
+                    break;
+                }
+            }
+            
+            // If not found by key, look for date pattern
+            if (!date) {
+                for (const key of keys) {
+                    const value = row[key];
+                    if (value && (value instanceof Date || String(value).match(/\d{1,2}[-/]\w{3,}[-/]\d{4}/))) {
+                        date = value;
+                        break;
+                    }
+                }
+            }
+            
+            // Find time - look for time-like values
+            const timeKeys = ['เวลา', 'Time', 'TIME', 'Clock'];
+            for (const key of timeKeys) {
+                if (row[key] !== undefined) {
+                    time = row[key];
+                    break;
+                }
+            }
+            
+            // If not found by key, look for time pattern
+            if (!time) {
+                for (const key of keys) {
+                    const value = row[key];
+                    if (value && (value instanceof Date || String(value).match(/\d{1,2}:\d{2}/))) {
+                        time = value;
+                        break;
+                    }
+                }
+            }
+            
+            // Parse date
+            let dateObj;
+            if (date instanceof Date) {
+                dateObj = date;
+            } else if (typeof date === 'string') {
+                // Parse DD-MMM-YYYY format
+                const match = date.match(/^(\d{1,2})[-/](\w{3,})[-/](\d{4})$/i);
+                if (match) {
+                    const day = parseInt(match[1], 10);
+                    const monthStr = match[2].toLowerCase();
+                    const year = parseInt(match[3], 10);
+                    
+                    const monthMap = {
+                        'jan': 0, 'feb': 1, 'mar': 2, 'apr': 3, 'may': 4, 'jun': 5,
+                        'jul': 6, 'aug': 7, 'sep': 8, 'oct': 9, 'nov': 10, 'dec': 11
+                    };
+                    
+                    const month = monthMap[monthStr.substring(0, 3)];
+                    if (month !== undefined) {
+                        dateObj = new Date(year, month, day);
+                    } else {
+                        dateObj = new Date(date);
+                    }
+                } else {
+                    dateObj = new Date(date);
+                }
+            } else if (typeof date === 'number') {
+                // Excel serial date
+                const excelEpoch = new Date(1899, 11, 30);
+                dateObj = new Date(excelEpoch.getTime() + date * 86400000);
+            }
+            
+            if (!dateObj || isNaN(dateObj.getTime())) {
+                console.warn(`Skipping row ${index+1}: Invalid date -`, date);
+                skippedCount++;
+                return;
+            }
+            
+            // Format date as YYYY-MM-DD
+            const year = dateObj.getFullYear();
+            const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const day = String(dateObj.getDate()).padStart(2, '0');
+            const dStr = `${year}-${month}-${day}`;
+            
+            // Parse time
+            let timeStr = '-';
+            if (time instanceof Date) {
+                const hours = String(time.getHours()).padStart(2, '0');
+                const minutes = String(time.getMinutes()).padStart(2, '0');
+                timeStr = `${hours}:${minutes}`;
+            } else if (typeof time === 'number') {
+                const totalSeconds = Math.round(time * 86400);
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+                timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+            } else if (typeof time === 'string') {
+                timeStr = time.trim();
+                if (!/^\d{1,2}:\d{2}$/.test(timeStr)) {
+                    timeStr = '-';
+                }
+            }
+            
+            // Get employee ID if available
+            const idKeys = ['รหัสพนักงาน', 'รหัส', 'ID', 'Employee ID', 'Emp ID'];
+            for (const key of idKeys) {
+                if (row[key] !== undefined) {
+                    empId = String(row[key]).trim();
+                    break;
+                }
+            }
+            
+            // Initialize employee data if not exists
+            if (!employeeData[name]) {
+                employeeData[name] = { id: empId, entries: [] };
+            }
+            
+            // Keep the first ID we find for this employee
+            if (employeeData[name].id === '-' && empId !== '-') {
+                employeeData[name].id = empId;
+            }
+            
+            // Check if we already have an entry for this date
+            const existingEntry = employeeData[name].entries.find(e => e.date === dStr);
+            if (!existingEntry) {
+                employeeData[name].entries.push({ date: dStr, time: timeStr });
+                processedCount++;
+            } else if (existingEntry.time === '-' && timeStr !== '-') {
+                existingEntry.time = timeStr;
+                processedCount++;
+            }
+        });
+        
+        // Sort entries by date for each employee
+        Object.keys(employeeData).forEach(name => {
+            employeeData[name].entries.sort((a, b) => new Date(a.date) - new Date(b.date));
+        });
+        
+        saveData();
+        refreshUI();
+        
+        let message = `Data processed successfully!`;
+        message += `\nProcessed: ${processedCount} entries`;
+        message += `\nTotal employees: ${Object.keys(employeeData).length}`;
+        if (skippedCount > 0) {
+            message += `\nSkipped: ${skippedCount} rows (invalid or incomplete data)`;
+        }
+        alert(message);
+        
+        // Debug: Show what was loaded
+        console.log("Loaded employees:", Object.keys(employeeData));
+        if (employeeData['PANYAPHON']) {
+            console.log("PANYAPHON data:", employeeData['PANYAPHON'].entries.slice(0, 10));
         }
     };
-    
     reader.readAsArrayBuffer(file);
 }
 
-// Process employee data from Excel
-function processEmployeeData(data) {
-    employeeData = {};
-    
-    data.forEach(row => {
-        if (row.length < 5) return; // Skip incomplete rows
-        
-        const name = row[0];
-        const equipment = row[1];
-        const id = row[2];
-        const time = row[3];
-        const date = row[4];
-        
-        if (!name || !time || !date) return; // Skip rows with missing data
-        
-        // Initialize employee if not exists
-        if (!employeeData[name]) {
-            employeeData[name] = {
-                id: id,
-                equipment: equipment,
-                entries: []
-            };
+function getStats(name, entries) {
+    const daily = {};
+    entries.forEach(e => { 
+        if(!daily[e.date]) daily[e.date] = e.time; 
+    });
+    let mins = 0, late = 0;
+    Object.keys(daily).forEach(d => {
+        const m = calcLate(name, d, daily[d]);
+        if(m > 0) { 
+            mins += m; 
+            late++; 
         }
-        
-        // Add entry
-        employeeData[name].entries.push({
-            date: date,
-            time: time
-        });
     });
-    
-    // Sort entries by date and time for each employee
-    Object.keys(employeeData).forEach(name => {
-        employeeData[name].entries.sort((a, b) => {
-            const dateA = new Date(a.date);
-            const dateB = new Date(b.date);
-            
-            if (dateA.getTime() !== dateB.getTime()) {
-                return dateA - dateB;
-            }
-            
-            // If same date, sort by time
-            const timeA = a.time.split(':').map(Number);
-            const timeB = b.time.split(':').map(Number);
-            
-            return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
-        });
-    });
+    return { 
+        days: Object.keys(daily).length, 
+        late, 
+        mins 
+    };
 }
 
-// Calculate late time for an employee on a specific date
-function calculateLateTime(employeeName, date, time) {
-    // Check if this is a manual entry with confirmed status
-    const manualEntry = manualEntries.find(entry => 
-        entry.employeeName === employeeName && 
-        entry.date === date && 
-        entry.time === time
-    );
-    
-    // If it's a manual entry marked as "not late", return 0
-    if (manualEntry && manualEntry.confirmed && !manualEntry.isLate) {
-        return 0;
-    }
-    
-    // Otherwise, calculate normally
-    const schedule = workSchedules[employeeName];
-    if (!schedule) return 0;
-    
-    // Check if it's Monday
-    const dayOfWeek = new Date(date).getDay();
-    const isMonday = dayOfWeek === 1;
-    
-    const startTime = isMonday ? schedule.mondayStart : schedule.start;
-    
-    // Convert times to minutes for comparison
-    const [startHour, startMinute] = startTime.split(':').map(Number);
-    const [timeHour, timeMinute] = time.split(':').map(Number);
-    
-    const startTotalMinutes = startHour * 60 + startMinute;
-    const timeTotalMinutes = timeHour * 60 + timeMinute;
-    
-    if (timeTotalMinutes > startTotalMinutes) {
-        return timeTotalMinutes - startTotalMinutes;
-    }
-    
-    return 0;
-}
-
-// Check if time is in the afternoon (after 12:00)
-function isAfternoon(time) {
-    const [hour] = time.split(':').map(Number);
-    return hour >= 12;
-}
-
-// Update the summary table
 function updateSummaryTable() {
-    const summaryBody = document.getElementById('summaryBody');
-    summaryBody.innerHTML = '';
-    
-    const reportType = document.getElementById('reportType').value;
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const year = parseInt(document.getElementById('yearSelect').value);
-    
+    const body = document.getElementById('summaryBody');
+    body.innerHTML = '';
+    const type = document.getElementById('reportType').value;
+    const m = parseInt(document.getElementById('monthSelect').value);
+    const y = parseInt(document.getElementById('yearSelect').value);
+
     Object.keys(employeeData).forEach(name => {
-        const employee = employeeData[name];
-        
-        // Filter entries based on report type
-        let filteredEntries = [...employee.entries];
-        let filteredManualEntries = manualEntries.filter(entry => entry.employeeName === name);
-        
-        if (reportType === 'monthly') {
-            filteredEntries = filteredEntries.filter(entry => {
-                const entryDate = new Date(entry.date);
-                return entryDate.getMonth() === month && entryDate.getFullYear() === year;
-            });
-            
-            filteredManualEntries = filteredManualEntries.filter(entry => {
-                const entryDate = new Date(entry.date);
-                return entryDate.getMonth() === month && entryDate.getFullYear() === year;
-            });
-        } else if (reportType === 'yearly') {
-            filteredEntries = filteredEntries.filter(entry => {
-                const entryDate = new Date(entry.date);
-                return entryDate.getFullYear() === year;
-            });
-            
-            filteredManualEntries = filteredManualEntries.filter(entry => {
-                const entryDate = new Date(entry.date);
-                return entryDate.getFullYear() === year;
-            });
-        }
-        
-        // Group entries by date
-        const entriesByDate = {};
-        filteredEntries.forEach(entry => {
-            if (!entriesByDate[entry.date]) {
-                entriesByDate[entry.date] = [];
-            }
-            entriesByDate[entry.date].push(entry);
-        });
-        
-        // Add manual entries
-        filteredManualEntries.forEach(entry => {
-            if (!entriesByDate[entry.date]) {
-                entriesByDate[entry.date] = [];
-            }
-            entriesByDate[entry.date].push({
-                date: entry.date,
-                time: entry.time,
-                isManual: true
-            });
-        });
-        
-        // Calculate statistics
-        let totalLateMinutes = 0;
-        let lateDays = 0;
-        let workDays = Object.keys(entriesByDate).length;
-        
-        Object.keys(entriesByDate).forEach(date => {
-            // Find the first arrival time for the day
-            const firstEntry = entriesByDate[date][0];
-            const lateMinutes = calculateLateTime(name, date, firstEntry.time);
-            
-            if (lateMinutes > 0) {
-                totalLateMinutes += lateMinutes;
-                lateDays++;
-            }
-        });
-        
-        // Convert to hours
-        const totalLateHours = (totalLateMinutes / 60).toFixed(2);
-        
-        // Create table row
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${name}</td>
-            <td>${employee.id}</td>
-            <td>${workDays}</td>
-            <td>${lateDays}</td>
-            <td class="late-time">${totalLateMinutes}</td>
-            <td class="late-time">${totalLateHours}</td>
-        `;
-        
-        summaryBody.appendChild(row);
+        const entries = employeeData[name].entries.filter(e => 
+            type === 'yearly' 
+                ? new Date(e.date).getFullYear() == y 
+                : isInCycle(e.date, m, y)
+        );
+        const stats = getStats(name, entries);
+        const row = body.insertRow();
+        row.innerHTML = `<td>${name}</td><td>${employeeData[name].id}</td><td>${stats.days}</td><td>${stats.late}</td><td>${stats.mins}</td><td>${(stats.mins/60).toFixed(2)}</td>`;
     });
 }
 
-// Update employee detail view
-function updateEmployeeDetailView() {
-    const employeeName = document.getElementById('employeeDetailSelect').value;
-    if (!employeeName) {
-        document.getElementById('employeeDetailContent').innerHTML = '<p>Please select an employee to view details.</p>';
-        return;
-    }
-    
-    const reportType = document.getElementById('employeeReportType').value;
-    const month = parseInt(document.getElementById('employeeMonthSelect').value);
-    const year = parseInt(document.getElementById('employeeYearSelect').value);
-    
-    // Update employee name in header
-    document.getElementById('employeeDetailName').textContent = `${employeeName} - Details`;
-    
-    // Update monthly summary
-    updateEmployeeMonthlySummary(employeeName, reportType, month, year);
-    
-    // Update daily details
-    updateEmployeeDailyDetails(employeeName, reportType, month, year);
-}
-
-// Update employee monthly summary
-function updateEmployeeMonthlySummary(employeeName, reportType, month, year) {
-    const monthlySummaryBody = document.getElementById('employeeMonthlySummary');
-    monthlySummaryBody.innerHTML = '';
-    
-    if (reportType === 'yearly') {
-        // Show monthly breakdown for the year
-        for (let m = 0; m < 12; m++) {
-            const monthEntries = getEmployeeEntriesForPeriod(employeeName, 'monthly', m, year);
-            const monthStats = calculateEmployeeStats(employeeName, monthEntries);
-            
-            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
-                               'July', 'August', 'September', 'October', 'November', 'December'];
-            
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${monthNames[m]} ${year}</td>
-                <td>${monthStats.workDays}</td>
-                <td>${monthStats.lateDays}</td>
-                <td class="late-time">${monthStats.totalLateMinutes}</td>
-                <td class="late-time">${monthStats.totalLateHours}</td>
-            `;
-            
-            monthlySummaryBody.appendChild(row);
-        }
-    } else {
-        // Show just the selected month
-        const monthEntries = getEmployeeEntriesForPeriod(employeeName, 'monthly', month, year);
-        const monthStats = calculateEmployeeStats(employeeName, monthEntries);
-        
-        const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 
-                           'July', 'August', 'September', 'October', 'November', 'December'];
-        
-        const row = document.createElement('tr');
-        row.innerHTML = `
-            <td>${monthNames[month]} ${year}</td>
-            <td>${monthStats.workDays}</td>
-            <td>${monthStats.lateDays}</td>
-            <td class="late-time">${monthStats.totalLateMinutes}</td>
-            <td class="late-time">${monthStats.totalLateHours}</td>
-        `;
-        
-        monthlySummaryBody.appendChild(row);
-    }
-}
-
-// Update employee daily details
-function updateEmployeeDailyDetails(employeeName, reportType, month, year) {
-    const dailyTable = document.getElementById('employeeDailyTable');
-    const dailyBody = document.getElementById('employeeDailyBody');
-    
-    // Clear previous content
-    dailyBody.innerHTML = '';
-    
-    // Get days in the month
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    
-    // Create header row with days
-    let headerRow = '<tr><th class="calendar-day">Date</th>';
-    for (let day = 1; day <= daysInMonth; day++) {
-        headerRow += `<th class="calendar-day">${day}</th>`;
-    }
-    headerRow += '</tr>';
-    dailyTable.querySelector('thead').innerHTML = headerRow;
-    
-    // Get ALL entries for the employee
-    const allEntries = [...employeeData[employeeName].entries];
-    const manualEntriesForEmployee = manualEntries.filter(entry => entry.employeeName === employeeName);
-    
-    // Combine with manual entries
-    const combinedEntries = [...allEntries];
-    manualEntriesForEmployee.forEach(entry => {
-        combinedEntries.push({
-            date: entry.date,
-            time: entry.time,
-            isManual: true
-        });
-    });
-    
-    // Group entries by date
-    const entriesByDate = {};
-    combinedEntries.forEach(entry => {
-        const entryDate = new Date(entry.date);
-        // Only include entries from the selected month and year
-        if (entryDate.getMonth() === month && entryDate.getFullYear() === year) {
-            const dateKey = entryDate.toISOString().split('T')[0]; // YYYY-MM-DD format
-            if (!entriesByDate[dateKey]) {
-                entriesByDate[dateKey] = [];
-            }
-            entriesByDate[dateKey].push(entry);
-        }
-    });
-    
-    // Sort entries within each date by time
-    Object.keys(entriesByDate).forEach(date => {
-        entriesByDate[date].sort((a, b) => {
-            const timeA = a.time.split(':').map(Number);
-            const timeB = b.time.split(':').map(Number);
-            return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
-        });
-    });
-    
-    // Create rows for different data
-    const firstArrivalRow = document.createElement('tr');
-    firstArrivalRow.innerHTML = '<td>First Arrival Time</td>';
-    
-    const lateMinutesRow = document.createElement('tr');
-    lateMinutesRow.innerHTML = '<td>Late Minutes</td>';
-    
-    const statusRow = document.createElement('tr');
-    statusRow.innerHTML = '<td>Status</td>';
-    
-    // Fill data for each day
-    for (let day = 1; day <= daysInMonth; day++) {
-        const dateStr = `${year}-${(month + 1).toString().padStart(2, '0')}-${day.toString().padStart(2, '0')}`;
-        const dayEntries = entriesByDate[dateStr] || [];
-        
-        if (dayEntries.length > 0) {
-            const firstEntry = dayEntries[0];
-            
-            // Check if this is a manual entry with special status
-            const isManualEntry = firstEntry.isManual;
-            const manualEntryData = isManualEntry ? 
-                manualEntries.find(entry => 
-                    entry.employeeName === employeeName && 
-                    entry.date === dateStr && 
-                    entry.time === firstEntry.time
-                ) : null;
-            
-            const lateMinutes = manualEntryData && manualEntryData.confirmed && !manualEntryData.isLate 
-                ? 0 
-                : calculateLateTime(employeeName, dateStr, firstEntry.time);
-            
-            const isAfternoonArrival = isAfternoon(firstEntry.time);
-            
-            // First arrival time cell
-            let firstArrivalCell = document.createElement('td');
-            firstArrivalCell.textContent = firstEntry.time;
-            
-            if (isManualEntry) {
-                if (manualEntryData.entryType === 'missing') {
-                    firstArrivalCell.innerHTML += ' <span class="status-badge status-confirmed">Missing Clock In</span>';
-                } else {
-                    firstArrivalCell.innerHTML += ' <span class="status-badge">Manual</span>';
-                }
-            }
-            
-            firstArrivalRow.appendChild(firstArrivalCell);
-            
-            // Late minutes cell
-            let lateMinutesCell = document.createElement('td');
-            if (lateMinutes > 0) {
-                lateMinutesCell.textContent = lateMinutes;
-                lateMinutesCell.classList.add('late-time');
-            } else {
-                lateMinutesCell.textContent = manualEntryData && manualEntryData.confirmed && !manualEntryData.isLate 
-                    ? '0 (Confirmed)' 
-                    : '0';
-            }
-            lateMinutesRow.appendChild(lateMinutesCell);
-            
-            // Status cell
-            let statusCell = document.createElement('td');
-            if (lateMinutes > 0) {
-                statusCell.innerHTML = '<span class="status-badge status-late">Late</span>';
-            } else {
-                if (manualEntryData && manualEntryData.confirmed && !manualEntryData.isLate) {
-                    statusCell.innerHTML = '<span class="status-badge status-confirmed">Work-Related</span>';
-                } else {
-                    statusCell.innerHTML = '<span class="status-badge status-ontime">On Time</span>';
-                }
-            }
-            statusRow.appendChild(statusCell);
-        } else {
-            // No record for this day
-            const noRecordCell = document.createElement('td');
-            noRecordCell.textContent = 'No record';
-            noRecordCell.classList.add('no-record');
-            firstArrivalRow.appendChild(noRecordCell);
-            
-            const emptyCell = document.createElement('td');
-            emptyCell.textContent = '-';
-            lateMinutesRow.appendChild(emptyCell);
-            
-            const statusCell = document.createElement('td');
-            statusCell.innerHTML = '<span class="status-badge">Absent?</span>';
-            statusRow.appendChild(statusCell);
-        }
-    }
-    
-    dailyBody.appendChild(firstArrivalRow);
-    dailyBody.appendChild(lateMinutesRow);
-    dailyBody.appendChild(statusRow);
-}
-
-// Get employee entries for a specific period
-function getEmployeeEntriesForPeriod(employeeName, reportType, month, year) {
-    let entries = [...employeeData[employeeName].entries];
-    let manualEntriesForEmployee = manualEntries.filter(entry => entry.employeeName === employeeName);
-    
-    if (reportType === 'monthly') {
-        entries = entries.filter(entry => {
-            const entryDate = new Date(entry.date);
-            return entryDate.getMonth() === month && entryDate.getFullYear() === year;
-        });
-        
-        manualEntriesForEmployee = manualEntriesForEmployee.filter(entry => {
-            const entryDate = new Date(entry.date);
-            return entryDate.getMonth() === month && entryDate.getFullYear() === year;
-        });
-    } else if (reportType === 'yearly') {
-        entries = entries.filter(entry => {
-            const entryDate = new Date(entry.date);
-            return entryDate.getFullYear() === year;
-        });
-        
-        manualEntriesForEmployee = manualEntriesForEmployee.filter(entry => {
-            const entryDate = new Date(entry.date);
-            return entryDate.getFullYear() === year;
-        });
-    }
-    
-    // Combine with manual entries and mark them
-    const combinedEntries = [...entries];
-    manualEntriesForEmployee.forEach(entry => {
-        combinedEntries.push({
-            date: entry.date,
-            time: entry.time,
-            isManual: true
-        });
-    });
-    
-    // Sort by date
-    combinedEntries.sort((a, b) => new Date(a.date) - new Date(b.date));
-    
-    return combinedEntries;
-}
-
-// Calculate employee statistics
-function calculateEmployeeStats(employeeName, entries) {
-    // Group entries by date
-    const entriesByDate = {};
-    entries.forEach(entry => {
-        if (!entriesByDate[entry.date]) {
-            entriesByDate[entry.date] = [];
-        }
-        entriesByDate[entry.date].push(entry);
-    });
-    
-    // Calculate statistics
-    let totalLateMinutes = 0;
-    let lateDays = 0;
-    let workDays = Object.keys(entriesByDate).length;
-    
-    Object.keys(entriesByDate).forEach(date => {
-        // Find the first arrival time for the day
-        const firstEntry = entriesByDate[date][0];
-        const lateMinutes = calculateLateTime(employeeName, date, firstEntry.time);
-        
-        if (lateMinutes > 0) {
-            totalLateMinutes += lateMinutes;
-            lateDays++;
-        }
-    });
-    
-    const totalLateHours = (totalLateMinutes / 60).toFixed(2);
-    
-    return {
-        workDays,
-        lateDays,
-        totalLateMinutes,
-        totalLateHours
-    };
-}
-
-// Update the raw data table
 function updateRawDataTable() {
-    const rawDataBody = document.getElementById('rawDataBody');
-    rawDataBody.innerHTML = '';
+    const body = document.getElementById('rawDataBody');
+    body.innerHTML = '';
+    const empF = document.getElementById('rawEmployeeFilter').value;
+    const mF = document.getElementById('rawMonthFilter').value;
+    const yF = parseInt(document.getElementById('rawYearFilter').value);
     
     Object.keys(employeeData).forEach(name => {
-        const employee = employeeData[name];
-        
-        employee.entries.forEach(entry => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${name}</td>
-                <td>${employee.equipment}</td>
-                <td>${employee.id}</td>
-                <td>${entry.time}</td>
-                <td>${entry.date}</td>
-            `;
-            
-            rawDataBody.appendChild(row);
+        if (empF && name !== empF) return;
+        employeeData[name].entries.forEach(e => {
+            const d = new Date(e.date);
+            if (mF !== "" && d.getMonth() != mF) return;
+            if (yF && d.getFullYear() != yF) return;
+            body.innerHTML += `<tr><td>${name}</td><td>${employeeData[name].id}</td><td>${e.time}</td><td>${e.date}</td></tr>`;
         });
     });
 }
 
-// Update employee select for manual entry
-function updateEmployeeSelect() {
-    const employeeSelect = document.getElementById('employeeSelect');
-    employeeSelect.innerHTML = '<option value="">Select Employee</option>';
-    
-    Object.keys(employeeData).forEach(name => {
-        const option = document.createElement('option');
-        option.value = name;
-        option.textContent = name;
-        employeeSelect.appendChild(option);
-    });
+function updateEmployeeSelects() {
+    const options = '<option value="">-- Select --</option>' + Object.keys(employeeData).map(n => `<option value="${n}">${n}</option>`).join('');
+    ['employeeDetailSelect', 'rawEmployeeFilter'].forEach(id => document.getElementById(id).innerHTML = options);
 }
 
-// Update employee detail select
-function updateEmployeeDetailSelect() {
-    const employeeDetailSelect = document.getElementById('employeeDetailSelect');
-    employeeDetailSelect.innerHTML = '<option value="">-- Select Employee --</option>';
-    
-    Object.keys(employeeData).forEach(name => {
-        const option = document.createElement('option');
-        option.value = name;
-        option.textContent = name;
-        employeeDetailSelect.appendChild(option);
-    });
-    
-    // Add event listener
-    employeeDetailSelect.addEventListener('change', updateEmployeeDetailView);
-}
-
-// Manual entry handler
-function addManualEntryHandler() {
-    const employeeName = document.getElementById('employeeSelect').value;
-    const date = document.getElementById('manualDate').value;
-    const time = document.getElementById('manualTime').value;
-    const entryType = document.querySelector('input[name="entryType"]:checked').value;
-    
-    if (!employeeName || !date || !time) {
-        alert('Please fill in all fields.');
-        return;
-    }
-
-    const isAfternoonArrival = isAfternoon(time);
-    const lateMinutes = calculateLateTime(employeeName, date, time);
-    
-    // For work-related late clock ins, show confirmation dialog
-    if (isAfternoonArrival && entryType === 'work-related') {
-        showConfirmationDialog(employeeName, date, time, lateMinutes);
-    } else {
-        // For missing clock in entries, add directly
-        addManualEntry(employeeName, date, time, 'missing', lateMinutes > 0);
-    }
-}
-
-// Show confirmation dialog for work-related late arrivals
-function showConfirmationDialog(employeeName, date, time, lateMinutes) {
-    const dialog = document.getElementById('confirmationDialog');
-    const confirmationText = document.getElementById('confirmationText');
-    
-    confirmationText.innerHTML = `
-        <strong>${employeeName}</strong> - ${date} at ${time}<br><br>
-        This is a late clock in (${lateMinutes} minutes after scheduled start time).<br>
-        Was this a work-related arrival (not late) or should it be counted as late?
-    `;
-    
-    dialog.style.display = 'flex';
-    
-    // Set up event listeners for confirmation buttons
-    document.getElementById('confirmLate').onclick = function() {
-        addManualEntry(employeeName, date, time, 'work-related', true);
-        dialog.style.display = 'none';
-    };
-    
-    document.getElementById('confirmNotLate').onclick = function() {
-        addManualEntry(employeeName, date, time, 'work-related', false);
-        dialog.style.display = 'none';
-    };
-}
-
-// Add manual entry with status
-function addManualEntry(employeeName, date, time, entryType, isLate) {
-    manualEntries.push({
-        employeeName: employeeName,
-        date: date,
-        time: time,
-        entryType: entryType,
-        isLate: isLate,
-        confirmed: true
-    });
-    
-    updateManualEntriesTable();
+function refreshUI() {
     updateSummaryTable();
-    
-    if (document.getElementById('employeeDetailSelect').value === employeeName) {
-        updateEmployeeDetailView();
-    }
-    
-    // Clear the form
-    document.getElementById('manualDate').value = '';
-    document.getElementById('manualTime').value = '';
+    updateEmployeeSelects();
+    updateRawDataTable();
 }
 
-// Enhanced manual entries table
-function updateManualEntriesTable() {
-    const manualEntriesBody = document.getElementById('manualEntriesBody');
-    manualEntriesBody.innerHTML = '';
-    
-    manualEntries.forEach((entry, index) => {
-        const row = document.createElement('tr');
-        
-        let typeBadge = entry.entryType === 'missing' 
-            ? '<span class="status-badge status-confirm">Missing Clock In Time</span>'
-            : '<span class="status-badge">Late Clock In due to Work Related</span>';
-        
-        let lateStatus = entry.isLate 
-            ? '<span class="status-badge status-late">Late</span>'
-            : '<span class="status-badge status-ontime">Not Late</span>';
-        
-        row.innerHTML = `
-            <td>${entry.employeeName}</td>
-            <td>${entry.date}</td>
-            <td>${entry.time}</td>
-            <td>${typeBadge}</td>
-            <td>${lateStatus}</td>
+function saveSchedule() {
+    const n = document.getElementById('newEmpName').value;
+    const s = document.getElementById('newEmpStart').value;
+    const m = document.getElementById('newEmpMonday').value;
+    if(!n || !s || !m) return alert("Fill all fields");
+    workSchedules[n] = { start: s, mondayStart: m };
+    saveData(); 
+    updateScheduleTable(); 
+    alert("Schedule saved!");
+}
+
+function updateScheduleTable() {
+    const body = document.getElementById('scheduleBody');
+    body.innerHTML = Object.keys(workSchedules).map(n => 
+        `<tr>
+            <td>${n}</td>
+            <td>${workSchedules[n].start}</td>
+            <td>${workSchedules[n].mondayStart}</td>
             <td>
-                <button class="toggle-late" data-index="${index}">Toggle Late</button>
-                <button class="delete-entry" data-index="${index}">Delete</button>
+                <button onclick="deleteSched('${n}')" class="danger">X</button>
             </td>
-        `;
-        
-        manualEntriesBody.appendChild(row);
-    });
-    
-    // Add event listeners
-    document.querySelectorAll('.delete-entry').forEach(button => {
-        button.addEventListener('click', function() {
-            const index = parseInt(this.getAttribute('data-index'));
-            const employeeName = manualEntries[index].employeeName;
-            manualEntries.splice(index, 1);
-            updateManualEntriesTable();
-            updateSummaryTable();
-            if (document.getElementById('employeeDetailSelect').value === employeeName) {
-                updateEmployeeDetailView();
-            }
-        });
-    });
-    
-    document.querySelectorAll('.toggle-late').forEach(button => {
-        button.addEventListener('click', function() {
-            const index = parseInt(this.getAttribute('data-index'));
-            manualEntries[index].isLate = !manualEntries[index].isLate;
-            updateManualEntriesTable();
-            updateSummaryTable();
-            if (document.getElementById('employeeDetailSelect').value === manualEntries[index].employeeName) {
-                updateEmployeeDetailView();
-            }
-        });
-    });
+        </tr>`
+    ).join('');
 }
 
-// Tab functionality
-function handleTabClick() {
-    // Remove active class from all tabs and contents
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    
-    // Add active class to clicked tab and corresponding content
-    this.classList.add('active');
-    const tabId = this.getAttribute('data-tab') + '-tab';
-    document.getElementById(tabId).classList.add('active');
-    
-    // If switching to employee tab, update the view if an employee is selected
-    if (tabId === 'employee-tab' && document.getElementById('employeeDetailSelect').value) {
-        updateEmployeeDetailView();
+window.deleteSched = (n) => { 
+    delete workSchedules[n]; 
+    saveData(); 
+    updateScheduleTable(); 
+};
+
+// DATA MANAGEMENT FUNCTIONS
+function clearAllData() {
+    if(confirm("Are you sure you want to delete ALL data? This cannot be undone!")) {
+        localStorage.clear();
+        employeeData = {};
+        workSchedules = {
+            'PANYAPHON': { start: '08:00', mondayStart: '07:30' }
+        };
+        location.reload();
     }
 }
 
-// Export summary data (EXCEL)
-function exportSummary() {
-    const reportType = document.getElementById('reportType').value;
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const year = parseInt(document.getElementById('yearSelect').value);
-
-    const filename = `employee_summary_${reportType}_${month + 1}_${year}`;
-
-    // Export table as Excel
-    downloadExcelFromTable("summaryTable", filename);
-}
-
-/*
-// Export summary data
-function exportSummary() {
-    const reportType = document.getElementById('reportType').value;
-    const month = parseInt(document.getElementById('monthSelect').value);
-    const year = parseInt(document.getElementById('yearSelect').value);
-    
-    let csvContent = "Employee Name,Employee ID,Work Days,Late Days,Total Late (Minutes),Total Late (Hours)\n";
-    
-    Object.keys(employeeData).forEach(name => {
-        const employee = employeeData[name];
-        
-        // Filter entries based on report type
-        let filteredEntries = [...employee.entries];
-        let filteredManualEntries = manualEntries.filter(entry => entry.employeeName === name);
-        
-        if (reportType === 'monthly') {
-            filteredEntries = filteredEntries.filter(entry => {
-                const entryDate = new Date(entry.date);
-                return entryDate.getMonth() === month && entryDate.getFullYear() === year;
-            });
-            
-            filteredManualEntries = filteredManualEntries.filter(entry => {
-                const entryDate = new Date(entry.date);
-                return entryDate.getMonth() === month && entryDate.getFullYear() === year;
-            });
-        } else if (reportType === 'yearly') {
-            filteredEntries = filteredEntries.filter(entry => {
-                const entryDate = new Date(entry.date);
-                return entryDate.getFullYear() === year;
-            });
-            
-            filteredManualEntries = filteredManualEntries.filter(entry => {
-                const entryDate = new Date(entry.date);
-                return entryDate.getFullYear() === year;
-            });
+// EXCEL EXPORT FUNCTIONS - FIXED VERSION
+function exportSummaryToExcel() {
+    try {
+        const table = document.getElementById('summaryTable');
+        if (!table || table.rows.length <= 1) {
+            alert("No summary data to export!");
+            return;
         }
         
-        // Group entries by date
-        const entriesByDate = {};
-        filteredEntries.forEach(entry => {
-            if (!entriesByDate[entry.date]) {
-                entriesByDate[entry.date] = [];
-            }
-            entriesByDate[entry.date].push(entry);
-        });
+        // Get report parameters
+        const type = document.getElementById('reportType').value;
+        const m = parseInt(document.getElementById('monthSelect').value);
+        const y = parseInt(document.getElementById('yearSelect').value);
         
-        // Add manual entries
-        filteredManualEntries.forEach(entry => {
-            if (!entriesByDate[entry.date]) {
-                entriesByDate[entry.date] = [];
-            }
-            entriesByDate[entry.date].push({
-                date: entry.date,
-                time: entry.time,
-                isManual: true
-            });
-        });
+        // Create data array
+        let data = [];
         
-        // Calculate statistics
-        let totalLateMinutes = 0;
-        let lateDays = 0;
-        let workDays = Object.keys(entriesByDate).length;
+        // Add title and metadata
+        data.push(["EMPLOYEE TIME TRACKING SUMMARY REPORT"]);
+        data.push([`Report Type: ${type === 'yearly' ? 'Yearly' : 'Monthly (26th-25th)'}`]);
+        data.push([`Period: ${type === 'yearly' ? `Year ${y}` : `${monthNames[m]} ${y}`}`]);
+        data.push([`Generated: ${new Date().toLocaleString()}`]);
+        data.push([]); // Empty row
         
-        Object.keys(entriesByDate).forEach(date => {
-            const firstEntry = entriesByDate[date][0];
-            const lateMinutes = calculateLateTime(name, date, firstEntry.time);
-            
-            if (lateMinutes > 0) {
-                totalLateMinutes += lateMinutes;
-                lateDays++;
-            }
-        });
-        
-        const totalLateHours = (totalLateMinutes / 60).toFixed(2);
-        
-        csvContent += `"${name}","${employee.id}",${workDays},${lateDays},${totalLateMinutes},${totalLateHours}\n`;
-    });
-    
-    downloadCSV(csvContent, `employee_summary_${reportType}_${month + 1}_${year}.csv`);
-}*/
-
-// Export employee data (EXCEL)
-function exportEmployeeData() {
-    const employeeName = document.getElementById('employeeDetailSelect').value;
-
-    if (!employeeName) {
-        alert("Please select an employee first.");
-        return;
-    }
-
-    const reportType = document.getElementById('employeeReportType').value;
-    const month = parseInt(document.getElementById('employeeMonthSelect').value);
-    const year = parseInt(document.getElementById('employeeYearSelect').value);
-
-    const filename = `${employeeName}_details_${reportType}_${month + 1}_${year}`;
-
-    // Use the daily table for export
-    downloadExcelFromTable("employeeDailyTable", filename);
-}
-
-/*
-// Export employee data
-function exportEmployeeData() {
-    const employeeName = document.getElementById('employeeDetailSelect').value;
-    if (!employeeName) {
-        alert('Please select an employee first.');
-        return;
-    }
-    
-    const reportType = document.getElementById('employeeReportType').value;
-    const month = parseInt(document.getElementById('employeeMonthSelect').value);
-    const year = parseInt(document.getElementById('employeeYearSelect').value);
-    
-    let csvContent = "Date,First Arrival Time,Late Minutes,Status,Entry Type\n";
-    
-    const entries = getEmployeeEntriesForPeriod(employeeName, reportType, month, year);
-    
-    // Group entries by date
-    const entriesByDate = {};
-    entries.forEach(entry => {
-        if (!entriesByDate[entry.date]) {
-            entriesByDate[entry.date] = [];
+        // Add table headers
+        const headers = [];
+        for (let i = 0; i < table.rows[0].cells.length; i++) {
+            headers.push(table.rows[0].cells[i].textContent);
         }
-        entriesByDate[entry.date].push(entry);
-    });
-    
-    Object.keys(entriesByDate).forEach(date => {
-        const firstEntry = entriesByDate[date][0];
-        const lateMinutes = calculateLateTime(employeeName, date, firstEntry.time);
+        data.push(headers);
         
-        let status = lateMinutes > 0 ? 'Late' : 'On Time';
-        let entryType = firstEntry.isManual ? 'Manual Entry' : 'Auto Recorded';
+        // Add table data
+        for (let i = 1; i < table.rows.length; i++) {
+            const row = table.rows[i];
+            const rowData = [];
+            for (let j = 0; j < row.cells.length; j++) {
+                rowData.push(row.cells[j].textContent);
+            }
+            data.push(rowData);
+        }
         
-        csvContent += `"${date}","${firstEntry.time}",${lateMinutes},"${status}","${entryType}"\n`;
-    });
-    
-    downloadCSV(csvContent, `${employeeName}_details_${reportType}_${month + 1}_${year}.csv`);
+        // Create worksheet
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        
+        // Set column widths
+        const colWidths = [
+            { wch: 25 }, // Name
+            { wch: 10 }, // ID
+            { wch: 12 }, // Work Days
+            { wch: 12 }, // Late Days
+            { wch: 15 }, // Total Mins
+            { wch: 15 }  // Total Hours
+        ];
+        ws['!cols'] = colWidths;
+        
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Summary Report");
+        
+        // Generate file name
+        const fileName = `Time_Tracking_Summary_${type === 'yearly' ? `Year_${y}` : `${monthNames[m]}_${y}`}.xlsx`;
+        
+        // Save file
+        XLSX.writeFile(wb, fileName);
+        
+    } catch (error) {
+        console.error("Error exporting summary:", error);
+        alert("Error exporting summary to Excel. Please try again.");
+    }
 }
-*/
 
-// Helper function to download CSV
-function downloadCSV(csvContent, filename) {
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-    
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-}
-
-// Helper: Export HTML table to Excel (.xlsx)
-function downloadExcelFromTable(tableId, filename) {
-    const table = document.getElementById(tableId);
-    const worksheet = XLSX.utils.table_to_sheet(table);
-    const workbook = XLSX.utils.book_new();
-
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Sheet1");
-
-    XLSX.writeFile(workbook, filename + ".xlsx");
+function exportEmployeeDetailToExcel() {
+    try {
+        const name = document.getElementById('employeeDetailSelect').value;
+        if (!name || !employeeData[name]) {
+            alert("Please select an employee first!");
+            return;
+        }
+        
+        // Get report parameters
+        const m = parseInt(document.getElementById('employeeMonthSelect').value);
+        const y = parseInt(document.getElementById('employeeYearSelect').value);
+        const type = document.getElementById('employeeReportType').value;
+        
+        // Create data array for ONLY the selected employee
+        let data = [];
+        
+        // Add title and metadata
+        data.push(["EMPLOYEE TIME TRACKING DETAILS"]);
+        data.push([`Employee: ${name}`]);
+        data.push([`Employee ID: ${employeeData[name].id || '-'}`]);
+        data.push([`Report Type: ${type === 'yearly' ? 'Yearly' : 'Monthly (26th-25th)'}`]);
+        data.push([`Period: ${type === 'yearly' ? `Year ${y}` : `${monthNames[m]} ${y}`}`]);
+        data.push([`Generated: ${new Date().toLocaleString()}`]);
+        data.push([]); // Empty row
+        
+        if (type === 'monthly') {
+            // MONTHLY VIEW
+            
+            // Get entries for this cycle FOR THE SELECTED EMPLOYEE ONLY
+            const cycleEntries = employeeData[name].entries.filter(e => isInCycle(e.date, m, y));
+            
+            // Create daily table
+            const daysInMonth = new Date(y, m + 1, 0).getDate();
+            const dayMap = {};
+            cycleEntries.forEach(e => { 
+                if(!dayMap[e.date]) dayMap[e.date] = e.time; 
+            });
+            
+            // Add daily table header
+            data.push(["DAILY TIME RECORD"]);
+            data.push(["Date", "Day", "Clock-In Time", "Late (minutes)", "Status", "Remarks"]);
+            
+            // Add each day's data
+            for(let i = 1; i <= daysInMonth; i++) {
+                const monthNum = m + 1;
+                const dStr = `${y}-${String(monthNum).padStart(2,'0')}-${String(i).padStart(2,'0')}`;
+                const dateObj = new Date(dStr);
+                const dayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
+                const displayDate = dateObj.toLocaleDateString('en-GB', { 
+                    day: '2-digit', 
+                    month: 'short', 
+                    year: 'numeric' 
+                });
+                
+                const time = dayMap[dStr] || '-';
+                const late = calcLate(name, dStr, time);
+                let status = 'On Time';
+                let remarks = '';
+                
+                if (time === '-') {
+                    status = 'No Record';
+                    remarks = 'No clock-in data';
+                } else if (late > 0) {
+                    status = 'Late';
+                    remarks = `${late} minutes late`;
+                }
+                
+                data.push([
+                    displayDate,
+                    dayName,
+                    time,
+                    late > 0 ? late : '-',
+                    status,
+                    remarks
+                ]);
+            }
+            
+            data.push([]); // Empty row
+            
+            // Add monthly summary
+            const stats = getStats(name, cycleEntries);
+            data.push(["MONTHLY SUMMARY"]);
+            data.push(["Metric", "Value"]);
+            data.push(["Work Days", stats.days]);
+            data.push(["Late Days", stats.late]);
+            data.push(["Total Late Minutes", stats.mins]);
+            data.push(["Total Late Hours", (stats.mins/60).toFixed(2)]);
+            data.push(["Late Rate", stats.days > 0 ? `${((stats.late/stats.days)*100).toFixed(1)}%` : '0%']);
+            
+        } else {
+            // YEARLY VIEW
+            
+            // Add yearly summary header
+            data.push(["YEARLY SUMMARY BY MONTH"]);
+            data.push(["Month", "Cycle Period", "Work Days", "Late Days", "Total Late Minutes", "Total Late Hours", "Late Rate"]);
+            
+            let yearlyWorkDays = 0;
+            let yearlyLateDays = 0;
+            let yearlyLateMins = 0;
+            
+            // Add monthly summaries FOR THE SELECTED EMPLOYEE ONLY
+            for(let i = 0; i < 12; i++) {
+                const monthlyEntries = employeeData[name].entries.filter(e => isInCycle(e.date, i, y));
+                const stats = getStats(name, monthlyEntries);
+                
+                if(stats.days > 0) {
+                    const cyclePeriod = `26 ${i === 0 ? 'Dec' : monthNames[i-1].substring(0,3)} - 25 ${monthNames[i].substring(0,3)}`;
+                    const lateRate = stats.days > 0 ? `${((stats.late/stats.days)*100).toFixed(1)}%` : '0%';
+                    
+                    data.push([
+                        monthNames[i],
+                        cyclePeriod,
+                        stats.days,
+                        stats.late,
+                        stats.mins,
+                        (stats.mins/60).toFixed(2),
+                        lateRate
+                    ]);
+                    
+                    yearlyWorkDays += stats.days;
+                    yearlyLateDays += stats.late;
+                    yearlyLateMins += stats.mins;
+                }
+            }
+            
+            data.push([]); // Empty row
+            
+            // Add yearly total
+            data.push(["YEARLY TOTAL"]);
+            data.push(["Work Days", "Late Days", "Total Late Minutes", "Total Late Hours", "Late Rate"]);
+            
+            const yearlyLateRate = yearlyWorkDays > 0 ? `${((yearlyLateDays/yearlyWorkDays)*100).toFixed(1)}%` : '0%';
+            data.push([
+                yearlyWorkDays,
+                yearlyLateDays,
+                yearlyLateMins,
+                (yearlyLateMins/60).toFixed(2),
+                yearlyLateRate
+            ]);
+            
+            data.push([]); // Empty row
+            
+            // Add detailed attendance summary
+            const yearlyEntries = employeeData[name].entries.filter(e => new Date(e.date).getFullYear() == y);
+            const dayMapYearly = {};
+            yearlyEntries.forEach(e => { 
+                if(!dayMapYearly[e.date]) dayMapYearly[e.date] = e.time; 
+            });
+            
+            let onTimeDays = 0;
+            let lateDays = 0;
+            let noRecordDays = 0;
+            
+            Object.keys(dayMapYearly).forEach(dateStr => {
+                const time = dayMapYearly[dateStr];
+                if (time === '-') {
+                    noRecordDays++;
+                } else {
+                    const late = calcLate(name, dateStr, time);
+                    if (late > 0) {
+                        lateDays++;
+                    } else {
+                        onTimeDays++;
+                    }
+                }
+            });
+            
+            data.push(["ATTENDANCE ANALYSIS"]);
+            data.push(["Status", "Days", "Percentage"]);
+            data.push(["On Time", onTimeDays, yearlyWorkDays > 0 ? `${((onTimeDays/yearlyWorkDays)*100).toFixed(1)}%` : '0%']);
+            data.push(["Late", lateDays, yearlyWorkDays > 0 ? `${((lateDays/yearlyWorkDays)*100).toFixed(1)}%` : '0%']);
+            data.push(["No Record", noRecordDays, yearlyWorkDays > 0 ? `${((noRecordDays/yearlyWorkDays)*100).toFixed(1)}%` : '0%']);
+            data.push(["Total", yearlyWorkDays, "100%"]);
+        }
+        
+        // Create worksheet
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        
+        // Set column widths based on content type
+        let colWidths;
+        if (type === 'monthly') {
+            colWidths = [
+                { wch: 15 }, // Date
+                { wch: 10 }, // Day
+                { wch: 15 }, // Time
+                { wch: 15 }, // Late
+                { wch: 12 }, // Status
+                { wch: 20 }  // Remarks
+            ];
+        } else {
+            colWidths = [
+                { wch: 15 }, // Month
+                { wch: 20 }, // Cycle Period
+                { wch: 12 }, // Work Days
+                { wch: 12 }, // Late Days
+                { wch: 18 }, // Late Minutes
+                { wch: 15 }, // Late Hours
+                { wch: 12 }  // Late Rate
+            ];
+        }
+        
+        ws['!cols'] = colWidths;
+        
+        // Style the header rows (optional - makes Excel look better)
+        if (!ws['!merges']) ws['!merges'] = [];
+        
+        // Create workbook
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Employee Details");
+        
+        // Generate file name
+        const safeName = name.replace(/[^a-zA-Z0-9ก-ฮ]/g, '_').substring(0, 30);
+        const fileName = `${safeName}_${type === 'yearly' ? `Year_${y}` : `${monthNames[m].substring(0,3)}_${y}`}.xlsx`;
+        
+        // Save file
+        XLSX.writeFile(wb, fileName);
+        
+        alert(`Excel file for ${name} has been exported successfully!`);
+        
+    } catch (error) {
+        console.error("Error exporting employee details:", error);
+        alert("Error exporting employee details to Excel. Please try again.");
+    }
 }
