@@ -566,13 +566,14 @@ function exportSummaryToExcel() {
         // Create data array
         let data = [];
         
+        /*
         // Add title and metadata
         data.push(["EMPLOYEE TIME TRACKING SUMMARY REPORT"]);
         data.push([`Report Type: ${type === 'yearly' ? 'Yearly' : 'Monthly (26th-25th)'}`]);
         data.push([`Period: ${type === 'yearly' ? `Year ${y}` : `${monthNames[m]} ${y}`}`]);
         data.push([`Generated: ${new Date().toLocaleString()}`]);
         data.push([]); // Empty row
-        
+        */
         // Add table headers
         const headers = [];
         for (let i = 0; i < table.rows[0].cells.length; i++) {
