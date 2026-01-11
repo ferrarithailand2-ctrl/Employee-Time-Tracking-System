@@ -347,12 +347,12 @@ function processExcelFile() {
                 employeeData[name] = { id: empId, entries: [] };
             }
             
-            // Keep the first ID we find for this employee
+            // Keep the first ID find for this employee
             if (employeeData[name].id === '-' && empId !== '-') {
                 employeeData[name].id = empId;
             }
             
-            // Check if we already have an entry for this date
+            // Check if already have an entry for this date
             const existingEntry = employeeData[name].entries.find(e => e.date === dStr);
             if (!existingEntry) {
                 employeeData[name].entries.push({ date: dStr, time: timeStr });
